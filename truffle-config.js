@@ -18,9 +18,8 @@
  *
  */
 
-// const HDWallet = require('truffle-hdwallet-provider');
-// const infuraKey = "fj4jll3k.....";
-//
+var HDWalletProvider = require("truffle-hdwallet-provider");
+let secret = require("./secret.json");
 // const fs = require('fs');
 // const mnemonic = fs.readFileSync(".secret").toString().trim();
 
@@ -51,6 +50,26 @@ module.exports = {
     develop: {
       port: 8545
     },
+
+      //web3.eth.isSyncing((error, result)=>{console.log(result);})
+    rinkeby: {
+        provider: function() {
+            return new HDWalletProvider(secret.rinkeby.mnemonic, secret.rinkeby.infuraApi);
+        },
+        network_id: 4,
+        gas: 4500000,
+        gasPrice: 10000000000,
+    },
+
+
+    mainnet: {
+        provider: function() {
+            return new HDWalletProvider(secret.mainnet.mnemonic, secret.mainnet.infuraApi);
+        },
+        network_id: 5,
+        gas: 4500000,
+        gasPrice: 10000000000,
+    }
 
     // Another network with more advanced options...
     // advanced: {

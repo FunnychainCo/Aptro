@@ -1,6 +1,9 @@
 const AptroToken = artifacts.require("AptroToken");
 const truffleAssert = require('truffle-assertions');
+const BN = require('bn.js');
+const Web3 = require('web3');
 const assert = require("chai").assert;
+const web3Interface = new Web3(web3.currentProvider);
 
 function toBytesInt32(num) {
     arr = new ArrayBuffer(4); // an Int32 takes 4 bytes
@@ -30,14 +33,15 @@ function fixSignature(signature) {
 async function signAndPrepareToSend(amount, account) {
     let nonce = await new Promise((resolve, reject) => {
         require('crypto').randomBytes(32, async (err, buffer) => {
-            resolve(buffer);
+            resolve(new BN(buffer).toBuffer("be",32));
         })
     });
-    let ammountAsBuffer = int32ToBytes256(amount);
+    let ammountAsBN = new BN(amount,10)
+    let ammountAsBuffer = ammountAsBN.toBuffer("be",32);
     for (let i = 0; i < 32; i++) {
         nonce[i] = nonce[i] | ammountAsBuffer[i];
     }
-    let hash = web3.utils.sha3(nonce);
+    let hash = web3Interface.utils.sha3("0x"+new BN(nonce).toString("hex",32));
     const signature = fixSignature(await web3.eth.sign(hash, account));
     return {
         account: account,
@@ -49,123 +53,130 @@ async function signAndPrepareToSend(amount, account) {
 
 contract("AptroToken", accounts => {
     let instance;
+    let DECIMAL_MULT = 1000000000000000000;
+    let accountA = accounts[0];
+    let accountB = accounts[2];
+    let accountC = accounts[3];
+    let initialDelegate = 10000*DECIMAL_MULT;
+    let inittialBalance = 10000*DECIMAL_MULT;
 
 
     it("should put 0 AptroToken in the first account", async () => {
         //pre
-        let instance = await AptroToken.new({from: accounts[0]});
+        let instance = await AptroToken.new({from: accountA});
         //test
-        const balance = await instance.balanceOf.call(accounts[0]);
-        assert.equal(balance.valueOf(), 0);
+        const balance = await instance.balanceOf.call(accountA);
+        assert.equal(balance.valueOf(), inittialBalance);
     });
 
     it("should mint", async () => {
         //pre
-        let instance = await AptroToken.new({from: accounts[0]});
+        let instance = await AptroToken.new({from: accountA});
         //test
-        const result = await instance.mint(accounts[0], 200, {from: accounts[0], value: 0});
+        const result = await instance.mint(accountA, 200, {from: accountA, value: 0});
         truffleAssert.eventEmitted(result, 'Transfer', async (ev) => {
-            const balance = await instance.balanceOf.call(accounts[0]);
-            assert.equal(balance.valueOf(), 200);
+            const balance = await instance.balanceOf.call(accountA);
+            assert.equal(balance.valueOf(), initialDelegate+20);
         });
     });
 
     it("should delegate", async () => {
         //pre
-        let instance = await AptroToken.new({from: accounts[0]});
-        await instance.mint(accounts[0], 200, {from: accounts[0], value: 0});
+        let instance = await AptroToken.new({from: accountA});
+        await instance.mint(accountA, 200, {from: accountA, value: 0});
         //test
-        const result = await instance.delegate(accounts[1], 150, {from: accounts[0], value: 0});
+        const result = await instance.delegate(accountB, 150, {from: accountA, value: 0});
         truffleAssert.eventEmitted(result, 'Transfer', async (ev) => {
-            const balanceA = await instance.balanceOf.call(accounts[0]);
-            assert.equal(balanceA.valueOf(), 50);
-            const balanceB = await instance.delegatedBalanceOf.call(accounts[1]);
+            const balanceA = await instance.balanceOf.call(accountA);
+            assert.equal(balanceA.valueOf(), initialDelegate + 200 - 150);
+            const balanceB = await instance.delegatedBalanceOf.call(accountB);
             assert.equal(balanceB.valueOf(), 150);
         });
     });
 
-    it("should undelegateAndTransfertTo", async () => {
+    it("should undelegateAndTransferTo", async () => {
         //pre
-        let instance = await AptroToken.new({from: accounts[0]});
-        await instance.mint(accounts[0], 200, {from: accounts[0], value: 0});
-        await instance.delegate(accounts[1], 150, {from: accounts[0], value: 0});
+        let instance = await AptroToken.new({from: accountA});
+        await instance.mint(accountA, 200, {from: accountA, value: 0});
+        await instance.delegate(accountB, 150, {from: accountA, value: 0});
         //test
-        const result = await instance.undelegateAndTransfertTo(accounts[2], 50, {from: accounts[1], value: 0});
+        const result = await instance.undelegateAndTransferTo(accountC, 50, {from: accountB, value: 0});
         truffleAssert.eventEmitted(result, 'Transfer', async (ev) => {
-            const balanceA = await instance.balanceOf.call(accounts[1]);
+            const balanceA = await instance.balanceOf.call(accountB);
             assert.equal(balanceA.valueOf(), 0);
-            const balanceB = await instance.delegatedBalanceOf.call(accounts[1]);
+            const balanceB = await instance.delegatedBalanceOf.call(accountB);
             assert.equal(balanceB.valueOf(), 100);
-            const balanceC = await instance.balanceOf.call(accounts[2]);
+            const balanceC = await instance.balanceOf.call(accountC);
             assert.equal(balanceC.valueOf(), 50);
-            const balanceD = await instance.delegatedBalanceOf.call(accounts[2]);
+            const balanceD = await instance.delegatedBalanceOf.call(accountC);
             assert.equal(balanceD.valueOf(), 0);
         });
     });
 
 
-    it("should undelegateAndTransfertFrom ok", async () => {
+    it("should undelegateAndTransferFrom ok", async () => {
         //pre
-        let instance = await AptroToken.new({from: accounts[0]});
-        await instance.mint(accounts[0], 200, {from: accounts[0], value: 0});
-        await instance.delegate(accounts[1], 150, {from: accounts[0], value: 0});
+        let instance = await AptroToken.new({from: accountA});
+        //let instance = await AptroToken.deployed();
+        await instance.mint(accountA, 2000000, {from: accountA, value: 0});
+        await instance.delegate(accountB, 1500000, {from: accountA, value: 0});
         //test
-        let amount = 50;
-        let dataToSend = await signAndPrepareToSend(amount, accounts[1]);
-        const result = await instance.undelegateAndTransfertFrom(dataToSend.account, dataToSend.signature, dataToSend.nonce, dataToSend.amount, {
-            from: accounts[2],
+        let amount = 500000;
+        let dataToSend = await signAndPrepareToSend(amount, accountB);
+        const result = await instance.undelegateAndTransferFrom(dataToSend.account, dataToSend.signature, dataToSend.nonce, dataToSend.amount, {
+            from: accountC,
             value: 0
         });
         await new Promise((resolve, reject) => {
             truffleAssert.eventEmitted(result, 'Transfer', async (ev) => {
-                const balanceA = await instance.balanceOf.call(accounts[1]);
+                const balanceA = await instance.balanceOf.call(accountB);
                 assert.equal(balanceA.valueOf(), 0);
-                const balanceB = await instance.delegatedBalanceOf.call(accounts[1]);
-                assert.equal(balanceB.valueOf(), 100);
-                const balanceC = await instance.balanceOf.call(accounts[2]);
-                assert.equal(balanceC.valueOf(), 50);
-                const balanceD = await instance.delegatedBalanceOf.call(accounts[2]);
+                const balanceB = await instance.delegatedBalanceOf.call(accountB);
+                assert.equal(balanceB.valueOf(), 1000000);
+                const balanceC = await instance.balanceOf.call(accountC);
+                assert.equal(balanceC.valueOf(), 500000);
+                const balanceD = await instance.delegatedBalanceOf.call(accountC);
                 assert.equal(balanceD.valueOf(), 0);
                 resolve();
             });
         });
     });
 
-    it("should undelegateAndTransfertFrom invalid amount", async () => {
+    it("should undelegateAndTransferFrom invalid amount", async () => {
         //pre
-        let instance = await AptroToken.new({from: accounts[0]});
-        await instance.mint(accounts[0], 200, {from: accounts[0], value: 0});
-        await instance.delegate(accounts[1], 150, {from: accounts[0], value: 0});
+        let instance = await AptroToken.new({from: accountA});
+        await instance.mint(accountA, 200, {from: accountA, value: 0});
+        await instance.delegate(accountB, 150, {from: accountA, value: 0});
         //test
         let amount = 50;
-        let dataToSend = await signAndPrepareToSend(amount, accounts[1]);
+        let dataToSend = await signAndPrepareToSend(amount, accountB);
         await truffleAssert.reverts(
-            instance.undelegateAndTransfertFrom(dataToSend.account, dataToSend.signature, dataToSend.nonce, 100, {
-                from: accounts[2],
+            instance.undelegateAndTransferFrom(dataToSend.account, dataToSend.signature, dataToSend.nonce, 100, {
+                from: accountC,
                 value: 0
             }),
         "AptroToken: invalid signature"
         );
     });
 
-    it("should undelegateAndTransfertFrom invalid nonce", async () => {
+    it("should undelegateAndTransferFrom invalid nonce", async () => {
         //pre
-        let instance = await AptroToken.new({from: accounts[0]});
-        await instance.mint(accounts[0], 200, {from: accounts[0], value: 0});
-        await instance.delegate(accounts[1], 150, {from: accounts[0], value: 0});
+        let instance = await AptroToken.new({from: accountA});
+        await instance.mint(accountA, 200, {from: accountA, value: 0});
+        await instance.delegate(accountB, 150, {from: accountA, value: 0});
         //test
         let amount = 50;
-        let dataToSend = await signAndPrepareToSend(amount, accounts[1]);
+        let dataToSend = await signAndPrepareToSend(amount, accountB);
         let nounce = dataToSend.nonce;
         //valide
-        await instance.undelegateAndTransfertFrom(dataToSend.account, dataToSend.signature, dataToSend.nonce, dataToSend.amount, {
-            from: accounts[2],
+        await instance.undelegateAndTransferFrom(dataToSend.account, dataToSend.signature, dataToSend.nonce, dataToSend.amount, {
+            from: accountC,
             value: 0
         });
 
         await truffleAssert.reverts(
-            instance.undelegateAndTransfertFrom(dataToSend.account, dataToSend.signature, nounce, dataToSend.amount, {
-                from: accounts[2],
+            instance.undelegateAndTransferFrom(dataToSend.account, dataToSend.signature, nounce, dataToSend.amount, {
+                from: accountC,
                 value: 0
             }),
             "AptroToken: invalid nonce"
