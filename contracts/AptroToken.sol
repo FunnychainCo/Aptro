@@ -41,6 +41,12 @@ contract AptroToken is ERC20Capped , ERC20Detailed,Ownable {
     }
 
     /**
+     * @dev Emitted when `value` tokens are delegated from one account (`from`) to
+     * another (`to`).
+     */
+    event Delegate(address indexed from, address indexed to, uint256 value);
+
+    /**
     * Delegate an amount of token to a manager address
     **/
     function delegate(address recipient, uint256 amount) public {
@@ -50,6 +56,7 @@ contract AptroToken is ERC20Capped , ERC20Detailed,Ownable {
 
         _transfer(sender,address(this),amount);
         _delegated[recipient] = _delegated[recipient].add(amount);
+        emit Delegate(sender, recipient, amount);
     }
 
     /**
